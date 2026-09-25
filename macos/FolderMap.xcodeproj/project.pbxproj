@@ -143,10 +143,10 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Folder Map";
 				INFOPLIST_KEY_CFBundleName = "Folder Map";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "Folder Map reads folder sizes on this Mac. It does not open or change your files.";
-				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Folder Map reads folder sizes on this Mac. It does not open or change your files.";
-				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "Folder Map reads folder sizes on this Mac. It does not open or change your files.";
-				INFOPLIST_KEY_NSRemovableVolumesUsageDescription = "Folder Map reads folder sizes on disks you connect. It does not open or change your files.";
+				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "Folder Map reads folder sizes on this Mac and can move items you choose to the Trash.";
+				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Folder Map reads folder sizes on this Mac and can move items you choose to the Trash.";
+				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "Folder Map reads folder sizes on this Mac and can move items you choose to the Trash.";
+				INFOPLIST_KEY_NSRemovableVolumesUsageDescription = "Folder Map reads folder sizes on disks you connect and can move items you choose to the Trash.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -174,10 +174,10 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Folder Map";
 				INFOPLIST_KEY_CFBundleName = "Folder Map";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "Folder Map reads folder sizes on this Mac. It does not open or change your files.";
-				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Folder Map reads folder sizes on this Mac. It does not open or change your files.";
-				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "Folder Map reads folder sizes on this Mac. It does not open or change your files.";
-				INFOPLIST_KEY_NSRemovableVolumesUsageDescription = "Folder Map reads folder sizes on disks you connect. It does not open or change your files.";
+				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "Folder Map reads folder sizes on this Mac and can move items you choose to the Trash.";
+				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Folder Map reads folder sizes on this Mac and can move items you choose to the Trash.";
+				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "Folder Map reads folder sizes on this Mac and can move items you choose to the Trash.";
+				INFOPLIST_KEY_NSRemovableVolumesUsageDescription = "Folder Map reads folder sizes on disks you connect and can move items you choose to the Trash.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var model = FolderMapModel()
+    @ObservedObject private var disk = DiskMonitor.shared
     private static var didInstallKeys = false
 
     var body: some View {
@@ -14,22 +15,63 @@ struct ContentView: View {
         }
         .navigationTitle("Folder Map")
         .onAppear {
+            DiskMonitor.shared.start()
             model.startIfNeeded()
             installKeyMonitor()
         }
+        .confirmationDialog(trashTitle, isPresented: trashPresented, titleVisibility: .visible) {
+            Button("Move to Trash", role: .destructive) { model.commitTrash() }
+            Button("Cancel", role: .cancel) { model.cancelTrash() }
+        } message: {
+            Text(trashDetail)
+        }
+        .alert("Couldn’t move that item", isPresented: trashErrorPresented) {
+            Button("OK", role: .cancel) { model.trashError = nil }
+        } message: {
+            Text(model.trashError ?? "")
+        }
+    }
+
+    private var trashPresented: Binding<Bool> {
+        Binding(
+            get: { model.pendingTrash != nil },
+            set: { if !$0 { model.cancelTrash() } }
+        )
+    }
+
+    private var trashErrorPresented: Binding<Bool> {
+        Binding(
+            get: { model.trashError != nil },
+            set: { if !$0 { model.trashError = nil } }
+        )
+    }
+
+    private var trashTitle: String {
+        guard let item = model.pendingTrash else { return "Move to the Trash?" }
+        return "Move \(item.name) to the Trash?"
+    }
+
+    private var trashDetail: String {
+        guard let item = model.pendingTrash else { return "" }
+        return "\(item.name) uses \(Format.bytes(item.size)) on disk. You can restore it from the Trash."
     }
 
     private var sidebar: some View {
+        // Scan replaces the summary and the folder list, so the content gets taller.
+        // Anchor the top on that size change. Otherwise the list jumps to the top edge and the first rows clip.
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 volumeSection
+                alertSection
                 folderSection
                 summarySection
                 largestSection
             }
             .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .modifier(TopAnchoredScroll())
+        .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
     }
 
     private var volumeSection: some View {
@@ -83,16 +125,48 @@ struct ContentView: View {
         }
     }
 
+    private var alertSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Free space alert")
+                .font(.headline)
+            if let free = disk.freeBytes {
+                Text("Startup disk: \(Format.bytes(free)) free.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text("Notify once when free space drops below this. It stays quiet until the disk recovers, or you pick a different mark.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Picker("Threshold", selection: thresholdBinding) {
+                ForEach(DiskMonitor.choices, id: \.bytes) { choice in
+                    Text(choice.label).tag(choice.bytes)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("free-space-threshold")
+        }
+    }
+
+    private var thresholdBinding: Binding<Int64> {
+        Binding(
+            get: { disk.thresholdBytes },
+            set: { disk.setThreshold($0) }
+        )
+    }
+
     private var folderSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Or scan another folder")
                 .font(.headline)
             TextField("Folder path", text: $model.pathInput)
+                .accessibilityIdentifier("folder-path")
                 .textFieldStyle(.roundedBorder)
                 .font(.body.monospaced())
-                .onSubmit { model.scan(model.pathInput) }
+                .onSubmit { scanFromField() }
             HStack {
-                Button("Scan") { model.scan(model.pathInput) }
+                Button("Scan") { scanFromField() }
                 Button("Choose Folder…") { model.chooseFolder() }
             }
         }
@@ -146,7 +220,7 @@ struct ContentView: View {
             } else {
                 ForEach(Array(nodes)) { node in
                     Button {
-                        model.open(node)
+                        model.select(node)
                     } label: {
                         HStack {
                             Image(systemName: icon(for: node.kind))
@@ -175,7 +249,13 @@ struct ContentView: View {
             notices
         }
         .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Leave the path field before measuring. A focused field makes the sidebar scroll to keep it visible, which shoves the folder list under the title bar.
+    private func scanFromField() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        model.scan(model.pathInput)
     }
 
     private var toolbar: some View {
@@ -187,6 +267,14 @@ struct ContentView: View {
             }
             .disabled((model.stack.count) <= 1)
             .help("Up one folder")
+            Button {
+                model.askToTrashSelection()
+            } label: {
+                Label("Move to Trash", systemImage: "trash")
+            }
+            .disabled(model.trashTarget == nil)
+            .help("Move the selected item to the Trash. You can restore it.")
+            .accessibilityIdentifier("move-to-trash")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     ForEach(Array(model.stack.enumerated()), id: \.offset) { index, crumb in
@@ -215,8 +303,8 @@ struct ContentView: View {
                 TreemapView(
                     nodes: blocks,
                     parentSize: current.size,
-                    activeID: (model.hover ?? blocks.first)?.id,
-                    onOpen: { model.open($0) },
+                    activeID: (model.selection ?? model.hover ?? blocks.first)?.id,
+                    onOpen: { model.select($0) },
                     onHover: { model.hover = $0 }
                 )
             } else if let current = model.current {
@@ -225,7 +313,7 @@ struct ContentView: View {
                 loadingMap
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -271,7 +359,7 @@ struct ContentView: View {
 
     private var focusLine: some View {
         let blocks = model.current.map { Squarify.visibleChildren($0) } ?? []
-        let focus = model.hover ?? blocks.first
+        let focus = model.hover ?? model.selection ?? blocks.first
         return VStack(alignment: .leading, spacing: 2) {
             if let focus, let current = model.current {
                 Text("\(focus.name)  \(Format.bytes(focus.size)) · \(Format.percent(part: focus.size, whole: current.size)) of this folder")
@@ -283,7 +371,7 @@ struct ContentView: View {
                     .lineLimit(1)
                     .accessibilityIdentifier("focus-path")
             } else {
-                Text("Hover a block for its size and path. Click a folder to open it.")
+                Text("Click a block to select it. Click a selected folder to open it.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -398,6 +486,19 @@ struct ContentView: View {
             if NSApp.keyWindow?.firstResponder is NSTextView { return event }
             model.goUp()
             return nil
+        }
+    }
+}
+
+/// Keeps the sidebar’s top edge in place when Scan changes the content height.
+private struct TopAnchoredScroll: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content
+                .defaultScrollAnchor(.top, for: .initialOffset)
+                .defaultScrollAnchor(.top, for: .sizeChanges)
+        } else {
+            content.defaultScrollAnchor(.top)
         }
     }
 }

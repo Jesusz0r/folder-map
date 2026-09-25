@@ -12,6 +12,9 @@ final class FolderMapModel: ObservableObject {
     @Published var pendingPath = ""
     @Published var stack: [TreeNode] = []
     @Published var hover: TreeNode?
+    @Published var selection: TreeNode?
+    @Published var pendingTrash: TreeNode?
+    @Published var trashError: String?
     @Published var slow = false
 
     private var generation = 0
@@ -62,6 +65,8 @@ final class FolderMapModel: ObservableObject {
         error = nil
         slow = false
         pendingPath = target
+        selection = nil
+        pendingTrash = nil
         slowTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             guard !Task.isCancelled, let self, token == self.generation, self.status == .loading else { return }
@@ -78,6 +83,8 @@ final class FolderMapModel: ObservableObject {
                     self.pendingPath = next.root
                     self.stack = [next.tree]
                     self.hover = nil
+                    self.selection = nil
+                    self.pendingTrash = nil
                     self.status = .ready
                 case .failure(let message):
                     self.status = .error
@@ -101,18 +108,27 @@ final class FolderMapModel: ObservableObject {
         scan(url.path)
     }
 
+    var trashTarget: TreeNode? {
+        guard let selection, TrashPolicy.canTrash(selection, scanRoot: result?.root) else { return nil }
+        return selection
+    }
+
     func goUp() {
         guard stack.count > 1 else { return }
         stack.removeLast()
         hover = nil
+        selection = nil
     }
 
-    func open(_ node: TreeNode) {
-        if node.kind == .directory {
+    /// First click selects. A second click on a selected folder opens it.
+    func select(_ node: TreeNode) {
+        if node.kind == .directory, selection?.id == node.id {
             stack.append(node)
             hover = nil
+            selection = nil
             return
         }
+        selection = node
         hover = node
     }
 
@@ -120,6 +136,71 @@ final class FolderMapModel: ObservableObject {
         guard stack.indices.contains(index) else { return }
         stack = Array(stack.prefix(index + 1))
         hover = nil
+        selection = nil
+    }
+
+    func askToTrashSelection() {
+        guard let trashTarget else { return }
+        pendingTrash = trashTarget
+    }
+
+    func cancelTrash() {
+        pendingTrash = nil
+    }
+
+    func commitTrash() {
+        guard let node = pendingTrash else { return }
+        pendingTrash = nil
+        let path = (node.path as NSString).standardizingPath
+        guard TrashPolicy.canTrash(node, scanRoot: result?.root) else { return }
+        do {
+            try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+        } catch {
+            trashError = "Couldn’t move \(node.name) to the Trash."
+            return
+        }
+        guard var tree = result?.tree else { return }
+        _ = removeNode(path: path, from: &tree)
+        result?.tree = tree
+        result?.size = tree.size
+        result?.fileCount = tree.fileCount
+        result?.dirCount = tree.dirCount
+        rebuildStack(from: tree)
+        selection = nil
+        hover = nil
+        DiskMonitor.shared.refresh()
+    }
+
+    private func rebuildStack(from tree: TreeNode) {
+        var next = [tree]
+        for crumb in stack.dropFirst() {
+            guard let match = next.last?.children.first(where: { $0.path == crumb.path }) else { break }
+            next.append(match)
+        }
+        stack = next
+    }
+
+    private func removeNode(path: String, from node: inout TreeNode) -> TreeNode? {
+        if let index = node.children.firstIndex(where: { $0.path == path }) {
+            let removed = node.children.remove(at: index)
+            subtract(removed, from: &node)
+            return removed
+        }
+        for index in node.children.indices {
+            if let removed = removeNode(path: path, from: &node.children[index]) {
+                subtract(removed, from: &node)
+                return removed
+            }
+        }
+        return nil
+    }
+
+    private func subtract(_ removed: TreeNode, from node: inout TreeNode) {
+        node.size = max(0, node.size - removed.size)
+        node.fileCount = max(0, node.fileCount - removed.fileCount)
+        if removed.kind == .directory {
+            node.dirCount = max(0, node.dirCount - 1 - removed.dirCount)
+        }
     }
 
     func volumeIsSelected(_ volume: MountedVolume) -> Bool {
