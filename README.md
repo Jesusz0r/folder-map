@@ -4,7 +4,7 @@ A local treemap of a folder. Point it at a directory and every file and subfolde
 
 Folder Map reads file metadata on this machine. It does not delete anything, and it does not send file names anywhere.
 
-Sizes are apparent lengths (what the filesystem reports for each file), not allocated blocks. Shortcuts are listed and not followed.
+Sizes are the space files take on disk (allocated blocks). A sparse file does not count as its full length, and a file with more than one name is counted once. Shortcuts are listed and not followed.
 
 Licensed under MIT. See [LICENSE](LICENSE).
 

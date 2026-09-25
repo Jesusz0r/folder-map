@@ -619,7 +619,7 @@ function Summary({
               </p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Sizes are apparent lengths, the byte count the filesystem reports.
+                Sizes are the space files take on disk. Sparse files count as their allocated blocks, and a file with more than one name counts once.
               </p>
             )}
             <p className="text-[11px] text-muted-foreground">Scanned in {result.elapsedMs} ms</p>

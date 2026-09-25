@@ -69,8 +69,10 @@ enum DiskScanner {
         )
     }
 
-    /// Walk with `fts` so every readable file is counted. Unreadable directories are omitted.
-    /// File bytes stay on the parent; only the largest files in each folder are kept as blocks.
+/// Walk with `fts` so every readable file is counted. Unreadable directories are omitted.
+/// Size is allocated space (`st_blocks` × 512), and each inode is counted once.
+/// A sparse file's apparent length is not treated as space used. File bytes stay on the
+/// parent; only the largest files in each folder are kept as blocks.
     private static func walk(root: String, state: ScanProgress, isCancelled: () -> Bool) -> WalkEnd {
         guard let raw = strdup(root) else { return .failed("That path is not valid.") }
         defer { free(raw) }
@@ -134,7 +136,8 @@ enum DiskScanner {
 
             case UInt16(FTS_F):
                 guard let frame = stack.last, !frame.omit else { continue }
-                let size = Int64(ent.pointee.fts_statp.pointee.st_size)
+                let info = ent.pointee.fts_statp.pointee
+                let size = state.allocatedBytes(info)
                 frame.addFile(size: size) {
                     let path = entryPath(ent)
                     return ((path as NSString).lastPathComponent, path)
@@ -351,13 +354,31 @@ private struct Kept {
     var size: Int64
 }
 
+private struct InodeKey: Hashable {
+    var dev: UInt64
+    var ino: UInt64
+}
+
 private final class ScanProgress {
     var skipped = 0
     var truncated = false
     var directories = 0
     let deadline: Date
+    private var seen = Set<InodeKey>()
 
     init(deadline: Date) {
         self.deadline = deadline
+    }
+
+    /// Allocated bytes for this directory entry. A later name for the same inode contributes nothing.
+    func allocatedBytes(_ info: Darwin.stat) -> Int64 {
+        let key = InodeKey(
+            dev: UInt64(bitPattern: Int64(info.st_dev)),
+            ino: UInt64(info.st_ino)
+        )
+        guard seen.insert(key).inserted else { return 0 }
+        let blocks = Int64(info.st_blocks)
+        if blocks <= 0 { return 0 }
+        return blocks * 512
     }
 }

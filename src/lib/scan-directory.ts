@@ -14,6 +14,7 @@ type ScanState = {
   truncated: boolean;
   unreadable: number;
   deadline: number;
+  seen: Set<string>;
 };
 
 export class ScanError extends Error {
@@ -63,6 +64,17 @@ function emptyNode(name: string, nodePath: string, kind: TreeNode["kind"]): Tree
     dirCount: 0,
     children: [],
   };
+}
+
+function allocatedBytes(
+  info: { blocks: number; dev: number | bigint; ino: number | bigint },
+  state: ScanState,
+): number {
+  const key = `${info.dev}:${info.ino}`;
+  if (state.seen.has(key)) return 0;
+  state.seen.add(key);
+  if (!Number.isFinite(info.blocks) || info.blocks <= 0) return 0;
+  return info.blocks * 512;
 }
 
 function isBlocked(target: string): boolean {
@@ -126,9 +138,9 @@ async function walk(dir: string, name: string, depth: number, state: ScanState):
       return null;
     }
     try {
-      const info = await stat(file.full);
+      const info = await lstat(file.full);
       const node = emptyNode(file.name, file.full, "file");
-      node.size = info.size;
+      node.size = allocatedBytes(info, state);
       return node;
     } catch {
       state.unreadable += 1;
@@ -275,6 +287,7 @@ export async function scanDirectory(requested: string | null): Promise<ScanResul
     truncated: false,
     unreadable: 0,
     deadline: started + SCAN_BUDGET_MS,
+    seen: new Set(),
   };
   const base = path.basename(root) || root;
   const tree = await walk(root, base, 0, state);
