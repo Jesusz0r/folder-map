@@ -16,6 +16,15 @@ export type VolumeInfo = {
   freeBytes: number;
 };
 
+export type MountedVolume = {
+  id: string;
+  name: string;
+  path: string;
+  startup: boolean;
+  totalBytes: number | null;
+  freeBytes: number | null;
+};
+
 export type ScanResult = {
   root: string;
   name: string;

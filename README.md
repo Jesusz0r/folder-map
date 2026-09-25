@@ -17,7 +17,9 @@ npm run dev
 
 Open [http://127.0.0.1:4721](http://127.0.0.1:4721).
 
-The first scan builds `sample-disk/` next to this repo (gitignored) and draws that tree. Paste another folder path and press Scan to read a different directory. Sample switches back to the generated tree.
+The first view lists mounted volumes: the startup disk, plus anything under `/Volumes`. It then scans the startup disk. Pick another volume, or paste a folder path and press Scan.
+
+A large volume can take about 20 seconds. If the scan hits that limit, or a folder denies access, the map stays up and says what is missing.
 
 ```bash
 npm run lint
@@ -27,7 +29,7 @@ npm run build
 
 ## API
 
-`GET /api/scan` reads the sample tree.
+`GET /api/volumes` lists the startup disk and other mounted volumes. The response is names, paths, and free space. It does not scan file trees.
 
 `GET /api/scan?path=/absolute/or/relative/folder` reads that folder. The response is metadata only: names, paths, and sizes. File contents are never returned.
 

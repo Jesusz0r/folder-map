@@ -40,5 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# generated sample tree (sparse files, recreated on first scan)
+# leftover local sample tree from older builds
 /sample-disk/

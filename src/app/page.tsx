@@ -1,16 +1,25 @@
 import { connection } from "next/server";
 import { FolderMap } from "@/components/folder-map";
-import { ScanError, scanDirectory } from "@/lib/scan-directory";
+import type { MountedVolume } from "@/lib/types";
+import { listMountedVolumes } from "@/lib/volumes";
 
 export default async function Home() {
   await connection();
-  let initial: Awaited<ReturnType<typeof scanDirectory>> | null = null;
-  let initialError: string | null = null;
+  let volumes: MountedVolume[] = [];
+  let volumesError: string | null = null;
   try {
-    initial = await scanDirectory(null);
-  } catch (error) {
-    initialError =
-      error instanceof ScanError ? error.message : "The sample tree could not be scanned.";
+    const listed = await listMountedVolumes();
+    volumes = listed.volumes;
+    volumesError = listed.error;
+  } catch {
+    volumesError = "Mounted volumes could not be listed.";
   }
-  return <FolderMap initial={initial} initialError={initialError} />;
+  const startup = volumes.find((volume) => volume.startup) ?? volumes[0] ?? null;
+  return (
+    <FolderMap
+      volumes={volumes}
+      volumesError={volumesError}
+      initialPath={startup?.path ?? null}
+    />
+  );
 }

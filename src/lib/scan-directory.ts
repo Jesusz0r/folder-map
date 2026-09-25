@@ -1,7 +1,6 @@
 import { lstat, readdir, stat, statfs } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
-import { ensureSampleTree, sampleRoot } from "@/lib/sample-tree";
 import type { ScanResult, TreeNode, VolumeInfo } from "@/lib/types";
 
 const MAX_NODES = 20_000;
@@ -11,6 +10,7 @@ const BLOCKED_PREFIXES = ["/proc", "/sys", "/dev"];
 
 type ScanState = {
   nodes: number;
+  nodeLimit: number;
   truncated: boolean;
   unreadable: number;
   deadline: number;
@@ -72,12 +72,18 @@ function isBlocked(target: string): boolean {
 }
 
 function remember(state: ScanState, node: TreeNode, children: TreeNode[]) {
-  if (state.nodes >= MAX_NODES) {
+  if (state.nodes >= state.nodeLimit) {
     state.truncated = true;
     return;
   }
   state.nodes += 1;
   children.push(node);
+}
+
+function notFullyScanned(name: string, full: string): TreeNode {
+  const node = emptyNode(name, full, "dir");
+  node.error = "This folder was not fully scanned.";
+  return node;
 }
 
 async function walk(dir: string, name: string, depth: number, state: ScanState): Promise<TreeNode> {
@@ -99,8 +105,10 @@ async function walk(dir: string, name: string, depth: number, state: ScanState):
   const links: TreeNode[] = [];
 
   for (const entry of dirents) {
-    if (entry.name === ".seeded") continue;
     const full = path.join(dir, entry.name);
+    // Other disks live under /Volumes and are chosen from the volume list.
+    if (dir === "/" && entry.name === "Volumes") continue;
+    if (isBlocked(full)) continue;
     if (entry.isSymbolicLink()) {
       links.push(emptyNode(entry.name, full, "symlink"));
       continue;
@@ -146,19 +154,43 @@ async function walk(dir: string, name: string, depth: number, state: ScanState):
 
   for (const link of links) remember(state, link, children);
 
-  for (const sub of dirs) {
-    const overBudget = state.nodes >= MAX_NODES || depth >= MAX_DEPTH || Date.now() > state.deadline;
-    if (overBudget) {
+  // Split the budget across the top level so one deep folder cannot hide the rest of a disk.
+  const savedDeadline = state.deadline;
+  const savedLimit = state.nodeLimit;
+  for (let index = 0; index < dirs.length; index += 1) {
+    const sub = dirs[index];
+    if (state.nodes >= savedLimit || depth >= MAX_DEPTH || Date.now() > savedDeadline) {
       state.truncated = true;
-      continue;
+      for (const rest of dirs.slice(index)) {
+        if (state.nodes >= savedLimit) break;
+        state.nodes += 1;
+        children.push(notFullyScanned(rest.name, rest.full));
+        dirCount += 1;
+      }
+      break;
     }
+
+    if (depth === 0 && dirs.length > 0) {
+      const remainingDirs = dirs.length - index;
+      const timeLeft = Math.max(0, savedDeadline - Date.now());
+      const nodesLeft = Math.max(0, savedLimit - state.nodes);
+      const timeShare = Math.max(200, Math.floor(timeLeft / remainingDirs));
+      const nodeShare = Math.max(24, Math.floor(nodesLeft / remainingDirs));
+      state.deadline = Math.min(savedDeadline, Date.now() + timeShare);
+      state.nodeLimit = Math.min(savedLimit, state.nodes + 1 + nodeShare);
+    }
+
     state.nodes += 1;
     const child = await walk(sub.full, sub.name, depth + 1, state);
+    state.deadline = savedDeadline;
+    state.nodeLimit = savedLimit;
     children.push(child);
     size += child.size;
     fileCount += child.fileCount;
     dirCount += 1 + child.dirCount;
   }
+  state.deadline = savedDeadline;
+  state.nodeLimit = savedLimit;
 
   children.sort((a, b) => b.size - a.size || a.name.localeCompare(b.name));
 
@@ -195,11 +227,12 @@ export async function scanDirectory(requested: string | null): Promise<ScanResul
     throw new ScanError("That path is too long.", 400, "invalid");
   }
 
-  const wantsSample = trimmed.length === 0 || path.resolve(trimmed) === sampleRoot();
-  let root = wantsSample ? sampleRoot() : path.resolve(trimmed);
-
-  if (wantsSample) {
-    await ensureSampleTree(root);
+  if (!trimmed) {
+    throw new ScanError("Choose a volume or a folder to scan.", 400, "invalid");
+  }
+  let root = path.resolve(trimmed);
+  if (root === path.join(process.cwd(), "sample-disk")) {
+    throw new ScanError("Choose a volume or a folder on this Mac.", 400, "invalid");
   }
 
   if (isBlocked(root)) {
@@ -238,6 +271,7 @@ export async function scanDirectory(requested: string | null): Promise<ScanResul
 
   const state: ScanState = {
     nodes: 1,
+    nodeLimit: MAX_NODES,
     truncated: false,
     unreadable: 0,
     deadline: started + SCAN_BUDGET_MS,

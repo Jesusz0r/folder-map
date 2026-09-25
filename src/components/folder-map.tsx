@@ -18,15 +18,41 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { nodeKey, TreemapView } from "@/components/treemap-view";
 import { formatBytes, formatCount, formatPercent } from "@/lib/format";
-import type { ScanErrorBody, ScanResult, TreeNode } from "@/lib/types";
+import type { MountedVolume, ScanErrorBody, ScanResult, TreeNode } from "@/lib/types";
 import { treemapChildren } from "@/lib/visible-children";
 
 type LoadState = "loading" | "ready" | "error";
+type VolumeListResponse = { volumes?: MountedVolume[]; error?: string };
+
+function volumeSelected(volumePath: string, currentPath: string): boolean {
+  if (!currentPath) return false;
+  if (volumePath === "/") {
+    return currentPath === "/" || (currentPath.startsWith("/") && !currentPath.startsWith("/Volumes"));
+  }
+  return currentPath === volumePath || currentPath.startsWith(`${volumePath}/`);
+}
+
+function problemPaths(node: TreeNode, limit: number, found: string[] = []): string[] {
+  if (found.length >= limit) return found;
+  if (node.error && node.error !== "This folder was not fully scanned.") {
+    found.push(node.path || node.name);
+  }
+  for (const child of node.children) {
+    if (found.length >= limit) break;
+    problemPaths(child, limit, found);
+  }
+  return found;
+}
 
 async function requestScan(path: string, signal: AbortSignal): Promise<ScanResult> {
-  const query = path.trim() ? `?path=${encodeURIComponent(path.trim())}` : "";
+  const query = `?path=${encodeURIComponent(path.trim())}`;
   const response = await fetch(`/api/scan${query}`, { signal, cache: "no-store" });
-  const body = (await response.json()) as ScanResult | ScanErrorBody;
+  let body: ScanResult | ScanErrorBody;
+  try {
+    body = (await response.json()) as ScanResult | ScanErrorBody;
+  } catch {
+    throw new Error("The scan failed before it could finish.");
+  }
   if (!response.ok || !("tree" in body)) {
     const message = "error" in body && body.error ? body.error : "The scan failed.";
     throw new Error(message);
@@ -41,32 +67,50 @@ function kindIcon(kind: TreeNode["kind"]) {
 }
 
 export function FolderMap({
-  initial,
-  initialError = null,
+  volumes: initialVolumes,
+  volumesError: initialVolumesError = null,
+  initialPath,
 }: {
-  initial: ScanResult | null;
-  initialError?: string | null;
+  volumes: MountedVolume[];
+  volumesError?: string | null;
+  initialPath: string | null;
 }) {
-  const [status, setStatus] = useState<LoadState>(initial ? "ready" : "error");
-  const [error, setError] = useState<string | null>(initial ? null : initialError);
-  const [result, setResult] = useState<ScanResult | null>(initial);
-  const [pathInput, setPathInput] = useState(initial?.root ?? "");
-  const [stack, setStack] = useState<TreeNode[]>(initial ? [initial.tree] : []);
+  const [volumes, setVolumes] = useState(initialVolumes);
+  const [volumesError, setVolumesError] = useState<string | null>(initialVolumesError);
+  const [status, setStatus] = useState<LoadState>(initialPath ? "loading" : "error");
+  const [error, setError] = useState<string | null>(
+    initialPath ? null : initialVolumesError ?? "No mounted volume was found.",
+  );
+  const [result, setResult] = useState<ScanResult | null>(null);
+  const [pathInput, setPathInput] = useState(initialPath ?? "");
+  const [pendingPath, setPendingPath] = useState(initialPath ?? "");
+  const [stack, setStack] = useState<TreeNode[]>([]);
   const [hover, setHover] = useState<TreeNode | null>(null);
   const [selected, setSelected] = useState<TreeNode | null>(null);
+  const [slow, setSlow] = useState(false);
   const requestId = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const startup = volumes.find((volume) => volume.startup) ?? null;
 
   const scan = useCallback(async (path: string) => {
+    const target = path.trim();
+    if (!target) {
+      setStatus("error");
+      setError("Choose a volume or paste a folder path.");
+      return;
+    }
     const id = requestId.current + 1;
     requestId.current = id;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const timer = window.setTimeout(() => controller.abort("timeout"), 45_000);
+    setSlow(false);
     setStatus("loading");
     setError(null);
+    setPendingPath(target);
     try {
-      const next = await requestScan(path, controller.signal);
+      const next = await requestScan(target, controller.signal);
       if (requestId.current !== id) return;
       setResult(next);
       setPathInput(next.root);
@@ -76,17 +120,55 @@ export function FolderMap({
       setStatus("ready");
     } catch (cause) {
       if (requestId.current !== id) return;
-      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      const timedOut = controller.signal.reason === "timeout";
+      if (cause instanceof DOMException && cause.name === "AbortError" && !timedOut) return;
       setStatus("error");
-      setError(cause instanceof Error ? cause.message : "The scan failed.");
+      setError(
+        timedOut
+          ? "The scan took too long and was stopped. Pick a smaller folder, or try the volume again."
+          : cause instanceof Error
+            ? cause.message
+            : "The scan failed.",
+      );
+    } finally {
+      window.clearTimeout(timer);
     }
   }, []);
+
+  const refreshVolumes = useCallback(async () => {
+    try {
+      const response = await fetch("/api/volumes", { cache: "no-store" });
+      const body = (await response.json()) as VolumeListResponse;
+      if (!response.ok || !Array.isArray(body.volumes)) {
+        setVolumesError(body.error || "Mounted volumes could not be listed.");
+        return;
+      }
+      setVolumes(body.volumes);
+      setVolumesError(body.error ?? null);
+    } catch {
+      setVolumesError("Mounted volumes could not be listed.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!initialPath) return;
+    const timer = window.setTimeout(() => {
+      void scan(initialPath);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [initialPath, scan]);
 
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (status !== "loading") return;
+    const timer = window.setTimeout(() => setSlow(true), 2_500);
+    return () => window.clearTimeout(timer);
+  }, [status, pendingPath]);
 
   const current = stack[stack.length - 1] ?? result?.tree ?? null;
 
@@ -129,6 +211,13 @@ export function FolderMap({
   const focus = hover ?? selected ?? blocks[0] ?? null;
   const quiet = current?.children.filter((child) => child.size <= 0) ?? [];
   const scanning = status === "loading";
+  const activePath = result?.root ?? pendingPath;
+  const unreadPaths = useMemo(
+    () => (result ? problemPaths(result.tree, 5) : []),
+    [result],
+  );
+  const scanningName =
+    volumes.find((volume) => volume.path === pendingPath)?.name ?? pendingPath ?? "this folder";
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-4 sm:px-6 sm:py-6">
@@ -148,6 +237,47 @@ export function FolderMap({
         <Badge variant="secondary">On this machine</Badge>
       </header>
 
+      <section className="flex flex-col gap-2" aria-label="Volumes on this Mac">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-xs font-medium text-muted-foreground">Volumes on this Mac</h2>
+          <Button type="button" variant="ghost" size="sm" onClick={() => void refreshVolumes()}>
+            Refresh volumes
+          </Button>
+        </div>
+        {volumesError ? (
+          <Alert>
+            <AlertCircle />
+            <AlertTitle>Volume list is incomplete</AlertTitle>
+            <AlertDescription>{volumesError}</AlertDescription>
+          </Alert>
+        ) : null}
+        {volumes.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {volumes.map((volume) => {
+              const active = volumeSelected(volume.path, activePath);
+              return (
+                <Button
+                  key={volume.id}
+                  type="button"
+                  variant={active ? "default" : "outline"}
+                  aria-pressed={active}
+                  onClick={() => {
+                    setPathInput(volume.path);
+                    void scan(volume.path);
+                  }}
+                >
+                  <HardDrive />
+                  {volume.name}
+                  {volume.startup ? <span className="font-normal opacity-80">Startup</span> : null}
+                </Button>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No mounted volumes were found.</p>
+        )}
+      </section>
+
       <form
         className="flex flex-col gap-2 sm:flex-row sm:items-end"
         onSubmit={(event) => {
@@ -157,35 +287,22 @@ export function FolderMap({
       >
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <label htmlFor="scan-path" className="text-xs font-medium text-muted-foreground">
-            Folder to scan
+            Or scan another folder
           </label>
           <Input
             id="scan-path"
             value={pathInput}
             onChange={(event) => setPathInput(event.target.value)}
-            placeholder="Leave blank to scan the sample tree"
+            placeholder="/Users or another folder on this Mac"
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
             className="h-9 font-mono text-xs sm:text-sm"
           />
         </div>
-        <div className="flex gap-2">
-          <Button type="submit" disabled={scanning} className="flex-1 sm:flex-none">
-            {scanning ? "Scanning…" : "Scan"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={scanning}
-            onClick={() => {
-              setPathInput("");
-              void scan("");
-            }}
-          >
-            Sample
-          </Button>
-        </div>
+        <Button type="submit" className="sm:mb-0">
+          {scanning ? "Scanning…" : "Scan"}
+        </Button>
       </form>
 
       <p className="sr-only" aria-live="polite">
@@ -204,18 +321,20 @@ export function FolderMap({
           <AlertTitle>Couldn’t scan that folder</AlertTitle>
           <AlertDescription>
             <p>{error}</p>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="mt-3"
-              onClick={() => {
-                setPathInput("");
-                void scan("");
-              }}
-            >
-              Open the sample tree
-            </Button>
+            {startup ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-3"
+                onClick={() => {
+                  setPathInput(startup.path);
+                  void scan(startup.path);
+                }}
+              >
+                Scan {startup.name}
+              </Button>
+            ) : null}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -273,7 +392,7 @@ export function FolderMap({
 
           <div className="bg-[#1e1e2e] p-2">
             {scanning && !result ? (
-              <LoadingMap />
+              <LoadingMap slow={slow} name={scanningName} />
             ) : current && blocks.length > 0 ? (
               <TreemapView
                 nodes={blocks}
@@ -288,11 +407,11 @@ export function FolderMap({
               <div className="flex aspect-[4/3] w-full flex-col items-center justify-center px-6 text-center">
                 <p className="font-medium">The map is empty until a scan succeeds.</p>
                 <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                  Check the path, or open the sample tree.
+                  Pick a volume above, or paste another folder path.
                 </p>
               </div>
             ) : (
-              <LoadingMap />
+              <LoadingMap slow={slow} name={scanningName} />
             )}
           </div>
 
@@ -333,13 +452,49 @@ export function FolderMap({
         </section>
       </div>
 
+      {scanning ? (
+        <Alert>
+          <AlertCircle />
+          <AlertTitle>{slow ? `Still reading ${scanningName}` : `Reading ${scanningName}`}</AlertTitle>
+          <AlertDescription>
+            {slow
+              ? "A large volume can take about 20 seconds. If it hits that limit, the map shows a partial scan instead of failing."
+              : "File names and sizes stay on this Mac. A large volume can take about 20 seconds."}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {result?.truncated ? (
         <Alert>
           <AlertCircle />
           <AlertTitle>This scan is partial</AlertTitle>
           <AlertDescription>
-            The scan stopped after {formatCount(20_000)} entries or about 20 seconds. Sizes below
-            that line are missing, so the biggest blocks are still the ones to trust.
+            The scan stopped after {formatCount(20_000)} entries or about 20 seconds. Folders past
+            that limit are listed without a full size. The blocks already measured are the ones to
+            trust. Paste a smaller folder above to read it completely.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {result && result.unreadable > 0 ? (
+        <Alert>
+          <AlertCircle />
+          <AlertTitle>Some items could not be read</AlertTitle>
+          <AlertDescription>
+            <p>
+              {formatCount(result.unreadable)}{" "}
+              {result.unreadable === 1 ? "item was" : "items were"} skipped because this Mac denied
+              access or the size could not be read. That space is missing from the map.
+            </p>
+            {unreadPaths.length > 0 ? (
+              <ul className="mt-2 font-mono text-[11px]">
+                {unreadPaths.map((item) => (
+                  <li key={item} className="truncate">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -359,7 +514,7 @@ export function FolderMap({
   );
 }
 
-function LoadingMap() {
+function LoadingMap({ slow, name }: { slow: boolean; name: string }) {
   return (
     <div className="flex aspect-[4/3] w-full flex-col gap-3 p-1">
       <div className="grid min-h-0 flex-1 grid-cols-3 grid-rows-2 gap-1.5">
@@ -367,7 +522,9 @@ function LoadingMap() {
         <Skeleton className="rounded-md bg-white/10" />
         <Skeleton className="rounded-md bg-white/10" />
       </div>
-      <p className="text-center text-sm text-muted-foreground">Reading file sizes…</p>
+      <p className="text-center text-sm text-muted-foreground">
+        {slow ? `Still reading ${name}…` : `Reading ${name}…`}
+      </p>
     </div>
   );
 }
