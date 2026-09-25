@@ -30,12 +30,12 @@ struct ScanResult {
     var size: Int64
     var fileCount: Int
     var dirCount: Int
-    var unreadable: Int
+    /// Folders the system would not open. They are left out of the map.
+    var skipped: Int
     var truncated: Bool
     var elapsedMs: Int
     var volume: VolumeInfo?
     var tree: TreeNode
-    var problemPaths: [String]
 }
 
 struct MountedVolume: Identifiable {

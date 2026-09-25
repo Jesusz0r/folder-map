@@ -123,11 +123,6 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if result.unreadable > 0 {
-                    Text("\(result.unreadable) \(result.unreadable == 1 ? "item" : "items") could not be read.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
                 Text("Scanned in \(Format.count(result.elapsedMs)) ms")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -247,10 +242,9 @@ struct ContentView: View {
     }
 
     private var loadingTitle: String {
-        let name = model.volumes.first { $0.path == model.pendingPath }?.name ?? model.pendingPath
-        let label = name.isEmpty ? "this folder" : name
+        let label = loadingLabel
         if model.slow {
-            return "Still reading \(label). A large volume can take about 20 seconds. If it hits that limit, the map shows a partial scan instead of failing."
+            return "Still reading \(label). A large folder can take a minute or two."
         }
         return "Reading \(label)…"
     }
@@ -321,39 +315,47 @@ struct ContentView: View {
     private var notices: some View {
         VStack(alignment: .leading, spacing: 8) {
             if model.status == .loading {
-                notice(
-                    title: model.slow ? "Still reading" : "Reading",
-                    message: model.slow
-                        ? "A large volume can take about 20 seconds. If it hits that limit, the map shows a partial scan instead of failing."
-                        : "File names and sizes stay on this Mac. A large volume can take about 20 seconds."
-                )
+                Text(model.slow
+                    ? "Still reading. A large folder can take a minute or two. File names and sizes stay on this Mac."
+                    : "File names and sizes stay on this Mac.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let message = model.error {
                 notice(title: "Couldn’t scan that folder", message: message)
-                if let startup = model.startup {
-                    Button("Scan \(startup.name)") {
-                        model.pathInput = startup.path
-                        model.scan(startup.path)
-                    }
+                Button("Scan Home") {
+                    let home = NSHomeDirectory()
+                    model.pathInput = home
+                    model.scan(home)
                 }
             }
             if model.result?.truncated == true {
                 notice(
                     title: "This scan is partial",
-                    message: "The scan stopped after \(Format.count(20_000)) entries or about 20 seconds. Folders past that limit are listed without a full size. The blocks already measured are the ones to trust. Choose a smaller folder to read it completely."
+                    message: "The scan stopped before every folder was measured. Blocks already measured are the ones to trust. Choose a smaller folder to read it completely."
                 )
             }
-            if let result = model.result, result.unreadable > 0 {
-                notice(
-                    title: "Some items could not be read",
-                    message: "\(Format.count(result.unreadable)) \(result.unreadable == 1 ? "item was" : "items were") skipped because this Mac denied access or the size could not be read. That space is missing from the map.",
-                    paths: result.problemPaths
-                )
+            if let result = model.result, result.skipped > 0 {
+                Text("Some folders were skipped because this Mac would not open them.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("skipped-note")
             }
         }
     }
 
-    private func notice(title: String, message: String, paths: [String] = []) -> some View {
+    private var loadingLabel: String {
+        let pending = model.pendingPath
+        if pending.isEmpty { return "this folder" }
+        if let volume = model.volumes.first(where: { $0.path == pending }) {
+            return volume.name
+        }
+        return pending
+    }
+
+    private func notice(title: String, message: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.headline)
@@ -361,11 +363,6 @@ struct ContentView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            ForEach(paths, id: \.self) { path in
-                Text(path)
-                    .font(.caption.monospaced())
-                    .lineLimit(1)
-            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

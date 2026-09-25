@@ -36,13 +36,9 @@ final class FolderMapModel: ObservableObject {
         didStart = true
         NSApplication.shared.activate()
         refreshVolumes()
-        if let startup {
-            pathInput = startup.path
-            scan(startup.path)
-        } else {
-            status = .error
-            error = volumesError ?? "No mounted volume was found."
-        }
+        let home = NSHomeDirectory()
+        pathInput = home
+        scan(home)
     }
 
     func refreshVolumes() {
@@ -130,7 +126,7 @@ final class FolderMapModel: ObservableObject {
         let current = activePath
         guard !current.isEmpty else { return false }
         if volume.path == "/" {
-            return current == "/" || (current.hasPrefix("/") && !current.hasPrefix("/Volumes"))
+            return current == "/"
         }
         return current == volume.path || current.hasPrefix(volume.path + "/")
     }
