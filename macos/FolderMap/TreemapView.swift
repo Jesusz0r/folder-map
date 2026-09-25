@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct TreemapView: View {
@@ -87,6 +88,15 @@ struct TreemapView: View {
 }
 
 extension Color {
+    /// Opaque secondary ink. System secondary is translucent, so it falls under 4.5:1 on the sidebar and disappears on the dark map.
+    static let readableSecondary = Color(nsColor: NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if dark {
+            return NSColor(srgbRed: 0xD1 / 255.0, green: 0xD1 / 255.0, blue: 0xD6 / 255.0, alpha: 1)
+        }
+        return NSColor(srgbRed: 0x4A / 255.0, green: 0x4A / 255.0, blue: 0x4F / 255.0, alpha: 1)
+    })
+
     init(hex: UInt32) {
         self.init(
             red: Double((hex >> 16) & 0xFF) / 255,

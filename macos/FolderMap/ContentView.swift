@@ -86,12 +86,12 @@ struct ContentView: View {
             if let volumesError = model.volumesError {
                 Text(volumesError)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.readableSecondary)
             }
             if model.volumes.isEmpty {
                 Text("No mounted volumes were found.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.readableSecondary)
             } else {
                 ForEach(model.volumes) { volume in
                     Button {
@@ -105,7 +105,7 @@ struct ContentView: View {
                                 if volume.startup {
                                     Text("Startup")
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(Color.readableSecondary)
                                 }
                             }
                             Spacer()
@@ -132,11 +132,11 @@ struct ContentView: View {
             if let free = disk.freeBytes {
                 Text("Startup disk: \(Format.bytes(free)) free.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.readableSecondary)
             }
             Text("Notify once when free space drops below this. It stays quiet until the disk recovers, or you pick a different mark.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.readableSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Picker("Threshold", selection: thresholdBinding) {
                 ForEach(DiskMonitor.choices, id: \.bytes) { choice in
@@ -179,7 +179,7 @@ struct ContentView: View {
             if let result = model.result, let current = model.current {
                 Text(result.root)
                     .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.readableSecondary)
                     .lineLimit(2)
                     .accessibilityIdentifier("scan-root")
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading) {
@@ -191,19 +191,19 @@ struct ContentView: View {
                 if let volume = result.volume {
                     Text("\(Format.percent(part: volume.freeBytes, whole: volume.totalBytes)) of this volume is free (\(Format.bytes(volume.freeBytes)) of \(Format.bytes(volume.totalBytes))).")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.readableSecondary)
                 } else {
                     Text("Free space for this volume isn’t available.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.readableSecondary)
                 }
                 Text("Scanned in \(Format.count(result.elapsedMs)) ms")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.readableSecondary)
             } else {
                 Text(model.status == .loading ? "Reading file sizes…" : "Waiting for a scan")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.readableSecondary)
             }
         }
     }
@@ -216,7 +216,7 @@ struct ContentView: View {
             if nodes.isEmpty {
                 Text(model.current == nil ? "Waiting for a scan" : "No sized items in this folder.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.readableSecondary)
             } else {
                 ForEach(Array(nodes)) { node in
                     Button {
@@ -224,13 +224,13 @@ struct ContentView: View {
                     } label: {
                         HStack {
                             Image(systemName: icon(for: node.kind))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.readableSecondary)
                             Text(node.name)
                                 .lineLimit(1)
                             Spacer()
                             Text(Format.bytes(node.size))
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.readableSecondary)
                         }
                     }
                     .buttonStyle(.plain)
@@ -280,13 +280,16 @@ struct ContentView: View {
                     ForEach(Array(model.stack.enumerated()), id: \.offset) { index, crumb in
                         if index > 0 {
                             Text("/")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.readableSecondary)
                         }
-                        Button(crumb.name) {
-                            model.revealCrumb(at: index)
+                        if index == model.stack.count - 1 {
+                            Text(crumb.name)
+                        } else {
+                            Button(crumb.name) {
+                                model.revealCrumb(at: index)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(index == model.stack.count - 1)
                     }
                 }
             }
@@ -320,9 +323,10 @@ struct ContentView: View {
     private var loadingMap: some View {
         VStack(spacing: 12) {
             ProgressView()
+                .tint(.white)
             Text(loadingTitle)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -341,12 +345,13 @@ struct ContentView: View {
         VStack(spacing: 8) {
             Image(systemName: "folder")
                 .font(.title)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.85))
             Text("Nothing in \(node.name) has a size")
                 .font(.headline)
+                .foregroundStyle(.white)
             Text(node.error ?? "This folder has no files or subfolders with a size.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.85))
                 .multilineTextAlignment(.center)
             if model.stack.count > 1 {
                 Button("Up one folder") { model.goUp() }
@@ -367,13 +372,13 @@ struct ContentView: View {
                     .lineLimit(1)
                 Text(focus.path.isEmpty ? "Smaller items grouped from this folder" : focus.path)
                     .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.readableSecondary)
                     .lineLimit(1)
                     .accessibilityIdentifier("focus-path")
             } else {
                 Text("Click a block to select it. Click a selected folder to open it.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.readableSecondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -397,7 +402,7 @@ struct ContentView: View {
             }
         }
         .font(.caption.monospaced())
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Color.readableSecondary)
     }
 
     private var notices: some View {
@@ -407,7 +412,7 @@ struct ContentView: View {
                     ? "Still reading. A large folder can take a minute or two. File names and sizes stay on this Mac."
                     : "File names and sizes stay on this Mac.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.readableSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let message = model.error {
@@ -427,7 +432,7 @@ struct ContentView: View {
             if let result = model.result, result.skipped > 0 {
                 Text("Some folders were skipped because this Mac would not open them.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.readableSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("skipped-note")
             }
@@ -449,7 +454,7 @@ struct ContentView: View {
                 .font(.headline)
             Text(message)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.readableSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
@@ -461,7 +466,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.readableSecondary)
             Text(value)
                 .font(.body.monospacedDigit())
         }
