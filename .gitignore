@@ -42,3 +42,8 @@ next-env.d.ts
 
 # leftover local sample tree from older builds
 /sample-disk/
+
+# macOS app build
+macos/build/
+**/xcuserdata/
+*.xcuserstate

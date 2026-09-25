@@ -8,7 +8,18 @@ Sizes are apparent lengths (what the filesystem reports for each file), not allo
 
 Licensed under MIT. See [LICENSE](LICENSE).
 
-## Run it
+## Mac app
+
+Folder Map is a SwiftUI app in `macos/`. It reads mounted volumes on this Mac, opens on the startup disk, and draws the same squarified map.
+
+```bash
+xcodebuild -project macos/FolderMap.xcodeproj -scheme FolderMap -configuration Release -destination 'platform=macOS' -derivedDataPath macos/build build
+open macos/build/Build/Products/Release/FolderMap.app
+```
+
+The first window lists the startup disk and anything under `/Volumes`, then scans the startup disk. Choose another volume, paste a folder path, or use Choose Folder. A large disk can take about 20 seconds. If the scan hits that limit, or a folder denies access, the window stays up and says what is missing.
+
+## Web app
 
 ```bash
 npm install
